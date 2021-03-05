@@ -13,11 +13,6 @@
             "type": "number",
             "default": 8
         },
-        "object-save": {
-            "description": "The save name of the BRS to load in as the object.",
-            "type": "string",
-            "default": "lugicutout"
-        },
         "cooldown": {
             "description": "Time to wait between targeting.",
             "type": "number",

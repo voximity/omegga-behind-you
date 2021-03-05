@@ -24,9 +24,12 @@ module.exports = class BehindYou {
         return Object.fromEntries(Object.entries(result).map(([k, n]) => [k, parseFloat(n.replace(",", ""))]));
     }
 
-    async startTargeting(user) {
-        if (this.target != null)
+    async startTargeting(user, useSameSave) {
+        let oldSave;
+        if (this.target != null) {
+            oldSave = this.target.save;
             this.unloadTarget(user);
+        }
 
         const {x, y, z, yaw} = await this.getPlayerTransform(user);
         const rotAxis = util.yawToAxis(yaw);
@@ -36,7 +39,9 @@ module.exports = class BehindYou {
             y - rotAxis[1] * objectDistance * 10,
             z
         ];
+        
         this.target = {
+            save: useSameSave ? (oldSave || this.pickRandomSave()) : this.pickRandomSave(),
             user: user,
             transform: [x, y, z],
             objectTransform: objectTransform,
@@ -45,7 +50,7 @@ module.exports = class BehindYou {
         };
 
         // load it in
-        this.saves[0].loadAt(...objectTransform, util.snapYaw(yaw));
+        this.target.save.loadAt(...objectTransform, util.snapYaw(yaw));
     }
 
     async unloadTarget() {
@@ -95,86 +100,103 @@ module.exports = class BehindYou {
         }
     }
 
+    pickRandomSave() {
+        const totalSaveWeights = this.saves.reduce((a, c) => a + (c.weight || 1), 0);
+        let rand = Math.random();
+
+        for (let i = 0; i < this.saves.length; i++) {
+            const chance = (this.saves[i].weight || 1) / totalSaveWeights;
+            rand -= chance;
+            if (rand < 0) return this.saves[i];
+        }
+
+        return this.saves[0];
+    }
+
     async init() {
-        this.target = null;
+        try {
+            this.target = null;
 
-        this.saves = [];
+            this.saves = [];
 
-        // add each save. for now, we will just use the one in the config
-        this.saves.push({name: this.config["object-save"]});
+            const objectsJson = JSON.parse(await fs.promises.readFile("plugins/omegga-behind-you/objects.json"));
+            objectsJson.forEach((s) => this.saves.push(s));
 
-        this.saves.forEach(async (save) => {
-            const file = await fs.promises.readFile(`data/Saved/Builds/${save.name}.brs`)
-            save.data = brs.read(file);
-            save.data.brick_owners = [owner];
+            this.saves.forEach(async (save) => {
+                const file = await fs.promises.readFile(`data/Saved/Builds/${save.name}.brs`)
+                save.data = brs.read(file);
+                save.data.brick_owners = [owner];
 
-            save.bounds = OMEGGA_UTIL.brick.getBounds(save.data);
+                save.bounds = OMEGGA_UTIL.brick.getBounds(save.data);
 
-            // move bricks to origin
-            save.data.bricks.forEach((brick) => {
-                brick.position = [
-                    brick.position[0] - save.bounds.center[0],
-                    brick.position[1] - save.bounds.center[1],
-                    brick.position[2] - save.bounds.center[2]
-                ];
+                // move bricks to origin
+                save.data.bricks.forEach((brick) => {
+                    brick.position = [
+                        brick.position[0] - save.bounds.center[0],
+                        brick.position[1] - save.bounds.center[1],
+                        brick.position[2] - save.bounds.center[2]
+                    ];
+                });
+                
+                save.rotate = (delta) => {
+                    save.data.bricks = save.data.bricks.map((brick) => OMEGGA_UTIL.brick.rotate_z(delta)(brick));
+                }
+
+                save.rotation = 0;
+
+                save.loadAt = (x, y, z, r) => {
+                    if (r > save.rotation) save.rotate(r - save.rotation);
+                    else if (r < save.rotation) save.rotate(4 - save.rotation + r);
+                    save.rotation = r;
+
+                    this.omegga.loadSaveData(save.data, {offX: x, offY: y, offZ: z, quiet: true});
+                };
             });
-            
-            save.rotate = (delta) => {
-                save.data.bricks = save.data.bricks.map((brick) => OMEGGA_UTIL.brick.rotate_z(delta)(brick));
-            }
 
-            save.rotation = 0;
+            this.interval = setInterval(async () => {
+                try {
+                    if (this.target == null) return;
 
-            save.loadAt = (x, y, z, r) => {
-                if (r > save.rotation) save.rotate(r - save.rotation);
-                else if (r < save.rotation) save.rotate(4 - save.rotation + r);
-                save.rotation = r;
+                    const currentTransform = await this.getPlayerTransform(this.target.user);
+                    const transformDiff = [
+                        this.target.objectTransform[0] - currentTransform.x,
+                        this.target.objectTransform[1] - currentTransform.y
+                    ];
+                    const viewingAngle = util.angleBetween(transformDiff, util.yawToVec(currentTransform.yaw)) * 180 / Math.PI;
 
-                this.omegga.loadSaveData(save.data, {offX: x, offY: y, offZ: z, quiet: true});
-            };
-        });
+                    if (Date.now() - this.target.time > this.config["max-object-lifetime"] * 1000) {
+                        // it has been some amount of time since started targeting, and it hasn't been seen, so just stop targeting
+                        this.unloadTarget();
+                        return;
+                    }
 
-        this.interval = setInterval(async () => {
-            try {
-                if (this.target == null) return;
+                    if (viewingAngle < 60 && !this.target.seen) {
+                        // mark object as seen
+                        this.time = Date.now();
+                        this.target.seen = true;
+                        return;
+                    }
 
-                const currentTransform = await this.getPlayerTransform(this.target.user);
-                const transformDiff = [
-                    this.target.objectTransform[0] - currentTransform.x,
-                    this.target.objectTransform[1] - currentTransform.y
-                ];
-                const viewingAngle = util.angleBetween(transformDiff, util.yawToVec(currentTransform.yaw)) * 180 / Math.PI;
+                    if (viewingAngle > 90 && this.target.seen) {
+                        // unload the object
+                        this.unloadTarget();
+                        return;
+                    }
 
-                if (Date.now() - this.target.time > this.config["max-object-lifetime"] * 1000) {
-                    // it has been some amount of time since started targeting, and it hasn't been seen, so just stop targeting
-                    this.unloadTarget();
-                    return;
+                    if (!this.target.seen && util.distance([currentTransform.x, currentTransform.y, currentTransform.z], this.target.objectTransform) > 15 * 10) {
+                        // reload the target to the new position
+                        const time = this.target.time;
+                        await this.startTargeting(this.target.user, true);
+                        this.target.time = time;
+                    }
+                } catch (e) {
+                    this.target = null; // remove target if an error occurs
                 }
+            }, 200);
 
-                if (viewingAngle < 60 && !this.target.seen) {
-                    // mark object as seen
-                    this.time = Date.now();
-                    this.target.seen = true;
-                    return;
-                }
-
-                if (viewingAngle > 90 && this.target.seen) {
-                    // unload the object
-                    this.unloadTarget();
-                    return;
-                }
-
-                if (!this.target.seen && util.distance([currentTransform.x, currentTransform.y, currentTransform.z], this.target.objectTransform) > 15 * 10) {
-                    // reload the target to the new position
-                    const time = this.target.time;
-                    await this.startTargeting(this.target.user);
-                    this.target.time = time;
-                }
-            } catch (e) {}
-        }, 200);
-
-        await this.timeout(1000);
-        this.targetLoop();
+            await this.timeout(1000);
+            this.targetLoop();
+        } catch (e) { console.log(e); }
     }
 
     async stop() {
