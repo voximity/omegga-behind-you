@@ -44,11 +44,7 @@ module.exports = class BehindYou {
     }
 
     yawToAxis(yaw) {
-        const snapped = this.snapYaw(yaw);
-        if (snapped == 0) return [-1, 0];
-        else if (snapped == 1) return [0, -1];
-        else if (snapped == 2) return [1, 0];
-        else if (snapped == 3) return [0, 1];
+        return [[-1, 0], [0, -1], [1, 0], [0, 1]][this.snapYaw(yaw)];
     }
 
     magnitude(a) {
