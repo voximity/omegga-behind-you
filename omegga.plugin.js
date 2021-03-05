@@ -22,7 +22,7 @@ module.exports = class BehindYou {
         const match = await this.omegga.watchLogChunk(
             `Chat.Command /GetTransform ${player}`,
             /Transform: X=(-?[0-9,.]+) Y=(-?[0-9,.]+) Z=(-?[0-9,.]+) Roll=(-?[0-9,.]+) Pitch=(-?[0-9,.]+) Yaw=(-?[0-9,.]+)/,
-            {first: () => true}
+            {first: (match) => match[0].startsWith("Transform:"), timeoutDelay: 1000}
         );
         const result = {x: match[0][1], y: match[0][2], z: match[0][3], roll: match[0][4], pitch: match[0][5], yaw: match[0][6]};
         return Object.fromEntries(Object.entries(result).map(([k, n]) => [k, parseFloat(n.replace(",", ""))]));
@@ -88,37 +88,44 @@ module.exports = class BehindYou {
 
         this.omegga.clearBricks(owner.id, true);
         this.target = null;
-
-        if (dontContinue) return;
-        await this.timeout(1000 * this.config.cooldown);
-        await this.startTargetingRandom();
     }
 
     async timeout(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    randomPlayerNotLast() {
-        const players = this.omegga.getPlayers();
-        const randomPlayer = players[Math.floor(Math.random() * players.length)];
-        if (this.lastPlayer == randomPlayer.name && players.length > 1) return randomPlayerNotLast();
-        this.lastPlayer = randomPlayer.name;
-        return this.lastPlayer;
-    }
-
-    async startTargetingRandom() {
-        try {
-            const target = this.randomPlayerNotLast();
-            console.log(`targeting ${target}`);
-            await this.startTargeting(target);
-            if (this.config.announce) this.omegga.broadcast(`<color="a00">The object is haunting <b>${target}</>...</>`)
-        } catch (e) {
-            if (this.omegga.getPlayers().length > 0) {
-                console.log(`failed to target, retargeting`);
-                await this.startTargetingRandom();
-            } else {
-                console.log("not enough players to target, waiting for a join");
+    async targetLoop() {
+        while (true) {
+            const players = this.omegga.getPlayers();
+            if (players.length == 0) {
+                console.log("Not enough players to target.");
+                await this.timeout(30 * 1000);
+                continue;
             }
+
+            let target;
+            if (players.length > 1) {
+                do {
+                    target = players[Math.floor(Math.random() * players.length)].name;
+                } while (target == this.lastPlayer);
+            } else
+                target = players[0].name;
+            
+            console.log(`Attempting to target ${target}...`);
+
+            try {
+                await this.startTargeting(target);
+                if (this.config.announce) this.omegga.broadcast(`<color="a00">The object is now haunting <b>${target}</>...</>`);
+            } catch (e) {
+                console.log("Error occurred targeting.");
+                console.log(e);
+            }
+
+            do {
+                await this.timeout(5 * 1000);
+            } while (this.target != null);
+
+            await this.timeout(this.config.cooldown * 1000);
         }
     }
 
@@ -191,6 +198,7 @@ module.exports = class BehindYou {
 
                 if (viewingAngle < 60 && !this.target.seen) {
                     // mark object as seen
+                    this.time = Date.now();
                     this.target.seen = true;
                     return;
                 }
@@ -210,15 +218,7 @@ module.exports = class BehindYou {
             } catch (e) {}
         }, 200);
 
-        this.omegga.on("join", async () => {
-            await this.timeout(5000);
-            await this.startTargetingRandom();
-        });
-
-        try {
-            await this.timeout(1000);
-            await this.startTargetingRandom();
-        } catch (e) { console.log(e); }
+        this.targetLoop();
     }
 
     async stop() {
