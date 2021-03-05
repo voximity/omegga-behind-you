@@ -1,0 +1,32 @@
+{
+    "name": "BehindYou",
+    "description": "It's behind you.",
+    "author": "x",
+    "config": {
+        "max-object-lifetime": {
+            "description": "The maximum lifetime for the object. It will unload after this amount of time in seconds.",
+            "type": "number",
+            "default": 20
+        },
+        "object-load-distance": {
+            "description": "How far away, in studs, to load the object from the target.",
+            "type": "number",
+            "default": 8
+        },
+        "object-save": {
+            "description": "The save name of the BRS to load in as the object.",
+            "type": "string",
+            "default": "lugicutout"
+        },
+        "cooldown": {
+            "description": "Time to wait between targeting.",
+            "type": "number",
+            "default": 30
+        },
+        "announce": {
+            "description": "Whether or not to announce who the object is targeting.",
+            "type": "boolean",
+            "default": false
+        }
+    }
+}

@@ -1,0 +1,7 @@
+{
+    "name": "omegga-behind-you",
+    "version": "0.0.1",
+    "dependencies": {
+        "brs-js": "^1.4.1"
+    }
+}
