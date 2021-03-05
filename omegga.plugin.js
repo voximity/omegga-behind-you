@@ -1,10 +1,6 @@
-//const owner = {
-//    name: "x",
-//    id: "3f5108a0-c929-4e77-a115-21f65096887b"
-//};
-
 const brs = require("brs-js");
 const fs = require("fs");
+const util = require("./util");
 
 const owner = {
     name: "BehindYou",
@@ -28,49 +24,18 @@ module.exports = class BehindYou {
         return Object.fromEntries(Object.entries(result).map(([k, n]) => [k, parseFloat(n.replace(",", ""))]));
     }
 
-    // temporary function, remove later
-    async loadBrickAt(x, y, z) {
-        await this.omegga.loadSaveData({
-            brick_owners: [owner],
-            brick_assets: ["PB_DefaultBrick"],
-            bricks: [
-                {size: [5, 5, 6], position: [x, y, z].map(Math.floor), owner_index: 1}
-            ]
-        }, {quiet: true});
-    }
-
-    snapYaw(yaw) {
-        return Math.floor((yaw + 225) % 360 / 90);
-    }
-
-    yawToAxis(yaw) {
-        return [[-1, 0], [0, -1], [1, 0], [0, 1]][this.snapYaw(yaw)];
-    }
-
-    magnitude(a) {
-        return Math.sqrt(a[0] * a[0] + a[1] * a[1]);
-    }
-
-    angleBetween(a, b) {
-        return Math.acos((a[0] * b[0] + a[1] * b[1]) / (this.magnitude(a) * this.magnitude(b)));
-    }
-
-    yawToVec(a) {
-        return [Math.cos(a * Math.PI / 180), Math.sin(a * Math.PI / 180)];
-    }
-
-    distance(a, b) {
-        const diffX = a[0] - b[0], diffY = a[1] - b[1], diffZ = a[2] - b[2];
-        return Math.sqrt(diffX * diffX + diffY * diffY + diffZ * diffZ);
-    }
-
     async startTargeting(user) {
         if (this.target != null)
             this.unloadTarget(user);
+
         const {x, y, z, yaw} = await this.getPlayerTransform(user);
-        const rotAxis = this.yawToAxis(yaw);
+        const rotAxis = util.yawToAxis(yaw);
         const objectDistance = this.config["object-load-distance"];
-        const objectTransform = [x - rotAxis[0] * objectDistance * 10, y - rotAxis[1] * objectDistance * 10, z];
+        const objectTransform = [
+            x - rotAxis[0] * objectDistance * 10,
+            y - rotAxis[1] * objectDistance * 10,
+            z
+        ];
         this.target = {
             user: user,
             transform: [x, y, z],
@@ -80,10 +45,10 @@ module.exports = class BehindYou {
         };
 
         // load it in
-        this.saves[0].loadAt(...objectTransform, this.snapYaw(yaw));
+        this.saves[0].loadAt(...objectTransform, util.snapYaw(yaw));
     }
 
-    async unloadTarget(dontContinue) {
+    async unloadTarget() {
         if (this.target == null) return;
 
         this.omegga.clearBricks(owner.id, true);
@@ -141,31 +106,17 @@ module.exports = class BehindYou {
         this.saves.forEach(async (save) => {
             const file = await fs.promises.readFile(`data/Saved/Builds/${save.name}.brs`)
             save.data = brs.read(file);
-
             save.data.brick_owners = [owner];
 
-            // calc bounds
-            let minX = Number.MAX_VALUE, minY = Number.MAX_VALUE, minZ = Number.MAX_VALUE;
-            let maxX = Number.MIN_VALUE, maxY = Number.MIN_VALUE, maxZ = Number.MIN_VALUE;
+            save.bounds = OMEGGA_UTIL.brick.getBounds(save.data);
 
-            save.data.bricks.forEach((brick) => {
-                brick.owner_index = 1;
-
-                if (brick.position[0] < minX) minX = brick.position[0];
-                if (brick.position[1] < minY) minY = brick.position[1];
-                if (brick.position[2] < minZ) minZ = brick.position[2];
-
-                if (brick.position[0] > maxX) maxX = brick.position[0];
-                if (brick.position[1] > maxY) maxY = brick.position[1];
-                if (brick.position[2] > maxZ) maxZ = brick.position[2];
-            });
-
-            // find center
-            save.center = [(minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2].map(Math.round);
-            
             // move bricks to origin
             save.data.bricks.forEach((brick) => {
-                brick.position = [brick.position[0] - save.center[0], brick.position[1] - save.center[1], brick.position[2] - save.center[2]];
+                brick.position = [
+                    brick.position[0] - save.bounds.center[0],
+                    brick.position[1] - save.bounds.center[1],
+                    brick.position[2] - save.bounds.center[2]
+                ];
             });
             
             save.rotate = (delta) => {
@@ -188,8 +139,11 @@ module.exports = class BehindYou {
                 if (this.target == null) return;
 
                 const currentTransform = await this.getPlayerTransform(this.target.user);
-                const transformDiff = [this.target.objectTransform[0] - currentTransform.x, this.target.objectTransform[1] - currentTransform.y];
-                const viewingAngle = this.angleBetween(transformDiff, this.yawToVec(currentTransform.yaw)) * 180 / Math.PI;
+                const transformDiff = [
+                    this.target.objectTransform[0] - currentTransform.x,
+                    this.target.objectTransform[1] - currentTransform.y
+                ];
+                const viewingAngle = util.angleBetween(transformDiff, util.yawToVec(currentTransform.yaw)) * 180 / Math.PI;
 
                 if (Date.now() - this.target.time > this.config["max-object-lifetime"] * 1000) {
                     // it has been some amount of time since started targeting, and it hasn't been seen, so just stop targeting
@@ -210,7 +164,7 @@ module.exports = class BehindYou {
                     return;
                 }
 
-                if (!this.target.seen && this.distance([currentTransform.x, currentTransform.y, currentTransform.z], this.target.objectTransform) > 15 * 10) {
+                if (!this.target.seen && util.distance([currentTransform.x, currentTransform.y, currentTransform.z], this.target.objectTransform) > 15 * 10) {
                     // reload the target to the new position
                     const time = this.target.time;
                     await this.startTargeting(this.target.user);
