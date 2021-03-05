@@ -108,6 +108,7 @@ module.exports = class BehindYou {
                 do {
                     target = players[Math.floor(Math.random() * players.length)].name;
                 } while (target == this.lastPlayer);
+                this.lastPlayer = target;
             } else
                 target = players[0].name;
             
@@ -218,6 +219,7 @@ module.exports = class BehindYou {
             } catch (e) {}
         }, 200);
 
+        await this.timeout(1000);
         this.targetLoop();
     }
 
