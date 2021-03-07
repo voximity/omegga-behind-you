@@ -172,7 +172,7 @@ module.exports = class BehindYou {
 
                     if (viewingAngle < 60 && !this.target.seen) {
                         // mark object as seen
-                        this.time = Date.now();
+                        this.target.time = Date.now();
                         this.target.seen = true;
                         return;
                     }
