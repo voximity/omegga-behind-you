@@ -122,19 +122,21 @@ module.exports = class BehindYou {
             const objectsJson = JSON.parse(await fs.promises.readFile("plugins/omegga-behind-you/objects.json"));
             objectsJson.forEach((s) => this.saves.push(s));
 
-            this.saves.forEach(async (save) => {
+            await Promise.all(this.saves.map(async (save) => {
                 const file = await fs.promises.readFile(`data/Saved/Builds/${save.name}.brs`)
                 save.data = brs.read(file);
                 save.data.brick_owners = [owner];
 
                 save.bounds = OMEGGA_UTIL.brick.getBounds(save.data);
 
+                const lowerZBound = save.bounds.center[2] - save.bounds.minBound[2];
+
                 // move bricks to origin
                 save.data.bricks.forEach((brick) => {
                     brick.position = [
                         brick.position[0] - save.bounds.center[0],
                         brick.position[1] - save.bounds.center[1],
-                        brick.position[2] - save.bounds.center[2]
+                        brick.position[2] - save.bounds.center[2] + lowerZBound
                     ];
                 });
                 
@@ -149,9 +151,9 @@ module.exports = class BehindYou {
                     else if (r < save.rotation) save.rotate(4 - save.rotation + r);
                     save.rotation = r;
 
-                    this.omegga.loadSaveData(save.data, {offX: x, offY: y, offZ: z, quiet: true});
+                    this.omegga.loadSaveData(save.data, {offX: x, offY: y, offZ: z - 20, quiet: true});
                 };
-            });
+            }));
 
             this.interval = setInterval(async () => {
                 try {
